@@ -1,0 +1,108 @@
+#!/bin/bash
+
+read -p "Enter VPC_NAME: " VPC_NAME
+read -p "Enter SUBNET_A: " SUBNET_A
+read -p "Enter SUBNET_B: " SUBNET_B
+read -p "Enter FIREWALL_1: " FIREWALL_1
+read -p "Enter FIREWALL_2: " FIREWALL_2
+read -p "Enter FIREWALL_3: " FIREWALL_3
+read -p "Enter ZONE_1 (e.g. us-central1-a): " ZONE_1
+read -p "Enter ZONE_2 (e.g. us-east1-b): " ZONE_2
+
+REGION_1=${ZONE_1%-*}
+REGION_2=${ZONE_2%-*}
+
+VM_1="us-test-01"
+VM_2="us-test-02"
+
+echo "Creating VPC Network..."
+
+gcloud compute networks create $VPC_NAME \
+    --project=$DEVSHELL_PROJECT_ID \
+    --subnet-mode=custom \
+    --mtu=1460 \
+    --bgp-routing-mode=regional
+
+echo "Creating Subnet A..."
+
+gcloud compute networks subnets create $SUBNET_A \
+    --project=$DEVSHELL_PROJECT_ID \
+    --region=$REGION_1 \
+    --network=$VPC_NAME \
+    --range=10.10.10.0/24 \
+    --stack-type=IPV4_ONLY
+
+echo "Creating Subnet B..."
+
+gcloud compute networks subnets create $SUBNET_B \
+    --project=$DEVSHELL_PROJECT_ID \
+    --region=$REGION_2 \
+    --network=$VPC_NAME \
+    --range=10.10.20.0/24 \
+    --stack-type=IPV4_ONLY
+
+echo "Creating Firewall Rule 1..."
+
+gcloud compute firewall-rules create $FIREWALL_1 \
+    --project=$DEVSHELL_PROJECT_ID \
+    --network=$VPC_NAME \
+    --direction=INGRESS \
+    --priority=1000 \
+    --action=ALLOW \
+    --rules=tcp:22 \
+    --source-ranges=0.0.0.0/0
+
+echo "Creating Firewall Rule 2..."
+
+gcloud compute firewall-rules create $FIREWALL_2 \
+    --project=$DEVSHELL_PROJECT_ID \
+    --network=$VPC_NAME \
+    --direction=INGRESS \
+    --priority=65535 \
+    --action=ALLOW \
+    --rules=tcp:3389 \
+    --source-ranges=0.0.0.0/24
+
+echo "Creating Firewall Rule 3..."
+
+gcloud compute firewall-rules create $FIREWALL_3 \
+    --project=$DEVSHELL_PROJECT_ID \
+    --network=$VPC_NAME \
+    --direction=INGRESS \
+    --priority=1000 \
+    --action=ALLOW \
+    --rules=icmp \
+    --source-ranges=10.10.10.0/24,10.10.20.0/24
+
+echo "Creating VM 1..."
+
+gcloud compute instances create $VM_1 \
+    --project=$DEVSHELL_PROJECT_ID \
+    --zone=$ZONE_1 \
+    --machine-type=e2-standard-2 \
+    --subnet=$SUBNET_A
+
+echo "Creating VM 2..."
+
+gcloud compute instances create $VM_2 \
+    --project=$DEVSHELL_PROJECT_ID \
+    --zone=$ZONE_2 \
+    --machine-type=e2-standard-2 \
+    --subnet=$SUBNET_B
+
+echo "Waiting for VMs to initialize..."
+sleep 20
+
+INTERNAL_IP=$(gcloud compute instances describe $VM_2 \
+    --zone=$ZONE_2 \
+    --format='get(networkInterfaces[0].networkIP)')
+
+echo "Testing Connectivity..."
+
+gcloud compute ssh $VM_1 \
+    --zone=$ZONE_1 \
+    --project=$DEVSHELL_PROJECT_ID \
+    --quiet \
+    --command="ping -c 3 $INTERNAL_IP"
+
+echo "Lab Completed Successfully"
